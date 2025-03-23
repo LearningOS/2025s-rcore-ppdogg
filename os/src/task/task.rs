@@ -1,7 +1,7 @@
 //! Types related to task management
 
 use super::TaskContext;
-use crate::syscall::MAP_SYSCALL;
+use crate::syscall::SYSCALL_MAP;
 
 /// The task control block (TCB) of a task.
 #[derive(Copy, Clone)]
@@ -11,7 +11,7 @@ pub struct TaskControlBlock {
     /// The task context
     pub task_cx: TaskContext,
     /// The number of systemcall of the task
-    pub syscall_cnt: [usize; MAP_SYSCALL.len()],
+    pub syscall_cnt: [usize; SYSCALL_MAP.len()],
 }
 
 /// The status of a task

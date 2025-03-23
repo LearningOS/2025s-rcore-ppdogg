@@ -11,7 +11,7 @@
 //! submodules, and you should also implement syscalls this way.
 
 /// Index to systemcall id
-pub const MAP_SYSCALL: [usize; 5] = [
+pub const SYSCALL_MAP: [usize; 5] = [
     SYSCALL_WRITE,
     SYSCALL_EXIT,
     SYSCALL_YIELD,
