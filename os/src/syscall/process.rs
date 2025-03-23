@@ -58,7 +58,7 @@ pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
             return 0;
         }
         2 => {
-            return TASK_MANAGER.get_current_task_systemcall() as isize;
+            return TASK_MANAGER.get_syscall_cnt(id) as isize;
         }
         _ => return -1,
     }

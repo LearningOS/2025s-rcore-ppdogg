@@ -20,6 +20,7 @@ use crate::sync::UPSafeCell;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
+use crate::syscall::MAP_SYSCALL;
 
 pub use context::TaskContext;
 
@@ -54,7 +55,7 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
-            trace_systemcall: 0,
+            syscall_cnt: [0; MAP_SYSCALL.len()],
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -138,17 +139,29 @@ impl TaskManager {
     }
 
     /// Count system call of current task
-    pub fn count_system_call(&self) {
+    pub fn count_syscall(&self, syscall_id: usize) {
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
-        inner.tasks[current].trace_systemcall += 1;
+        for (i, syscall) in MAP_SYSCALL.iter().enumerate() {
+            // println!("my debug {} {}", syscall, inner.systemcall_cnt[i]);
+            if *syscall == syscall_id {
+                inner.tasks[current].syscall_cnt[i] += 1;
+                break;
+            }
+        }
     }
 
     /// Get system call of current task
-    pub fn get_current_task_systemcall(&self) -> usize {
+    pub fn get_syscall_cnt(&self, syscall_id: usize) -> usize {
         let inner = self.inner.exclusive_access();
         let current = inner.current_task;
-        inner.tasks[current].trace_systemcall
+        for (i, syscall) in MAP_SYSCALL.iter().enumerate() {
+            // println!("my debug {} {}", syscall, inner.systemcall_cnt[i]);
+            if *syscall == syscall_id {
+                return inner.tasks[current].syscall_cnt[i];
+            }
+        }
+        0
     }
 }
 
