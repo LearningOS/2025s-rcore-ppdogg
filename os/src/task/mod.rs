@@ -17,7 +17,7 @@ mod task;
 use crate::loader::{get_app_data, get_num_app};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
-use crate::mm::{VirtAddr, PhysAddr, VirtPageNum};
+use crate::mm::{VirtAddr, PhysAddr};
 use crate::syscall::SYSCALL_MAP;
 use alloc::vec::Vec;
 use lazy_static::*;
@@ -129,12 +129,34 @@ impl TaskManager {
     }
 
     /// Convert a virtual address to a physical address
-    pub fn current_va_2_pa(&self, va: VirtAddr) -> Option<PhysAddr> {
+    pub fn current_read_va_2_pa(&self, va: VirtAddr) -> Option<PhysAddr> {
         let inner = self.inner.exclusive_access();
-        let vpn = VirtPageNum::from(va);
-        let ppn = inner.tasks[inner.current_task].memory_set.translate(vpn).unwrap().ppn();
-        let pa = PhysAddr::from(ppn);
-        Some(PhysAddr::from(pa.0 | va.page_offset()))
+        let vpn = va.floor();
+        if let Some(pte) = inner.tasks[inner.current_task].memory_set.translate(vpn) {
+            if !pte.readable() || !pte.visible() {
+                return None;
+            }
+            let pa = PhysAddr::from(pte.ppn());
+            Some(PhysAddr::from(pa.0 | va.page_offset()))
+        } else {
+            None
+        }
+        
+    }
+    /// Convert a virtual address to a physical address
+    pub fn current_write_va_2_pa(&self, va: VirtAddr) -> Option<PhysAddr> {
+        let inner = self.inner.exclusive_access();
+        let vpn = va.floor();
+        if let Some(pte) = inner.tasks[inner.current_task].memory_set.translate(vpn) {
+            if !pte.writable() || !pte.visible() {
+                return None;
+            }
+            let pa = PhysAddr::from(pte.ppn());
+            Some(PhysAddr::from(pa.0 | va.page_offset()))
+        } else {
+            None
+        }
+        
     }
 
     /// Count syscall from current task
@@ -156,6 +178,28 @@ impl TaskManager {
             if *syscall == syscall_id {
                 return inner.tasks[inner.current_task].syscall_cnt[i];
             }
+        }
+        0
+    }
+
+    /// Map an area to page table of current task
+    pub fn current_map_new_page(&self, start: VirtAddr, end: VirtAddr, prot: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let current_task = inner.current_task;
+        if inner.tasks[current_task].memory_set.map_new_page(start, end, prot) == false {
+            // panic!("page already exists")
+            return -1;
+        }
+        0
+    }
+
+    /// Unmap an area of page table of current task
+    pub fn current_unmap(&self, start: VirtAddr, end: VirtAddr) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let current_task = inner.current_task;
+        if inner.tasks[current_task].memory_set.unmap_page(start, end) == false {
+            // panic!("page doesn't exist")
+            return -1;
         }
         0
     }

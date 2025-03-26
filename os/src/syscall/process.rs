@@ -32,7 +32,7 @@ pub fn sys_yield() -> isize {
 pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
     let us = get_time_us();
-    if let Some(pa) = TASK_MANAGER.current_va_2_pa(VirtAddr::from(ts as usize)) {
+    if let Some(pa) = TASK_MANAGER.current_write_va_2_pa(VirtAddr::from(ts as usize)) {
         let pa_ceil = PhysAddr::from(pa.ceil());
         unsafe {
             let addr = pa.0 as *mut usize;
@@ -45,7 +45,7 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
             }
             return 0;
         }
-        if let Some(pa) = TASK_MANAGER.current_va_2_pa(VirtAddr::from(ts as usize + 8)) {
+        if let Some(pa) = TASK_MANAGER.current_write_va_2_pa(VirtAddr::from(ts as usize + 8)) {
             unsafe {
                 let addr = pa.0 as *mut usize;
                 *addr = us % 1_000_000;
@@ -64,23 +64,26 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
 pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
     match trace_request {
         0 => {
-            let mut result: isize = 0;
-            if let Some(pa) = TASK_MANAGER.current_va_2_pa(VirtAddr::from(id)) {
+            if let Some(pa) = TASK_MANAGER.current_read_va_2_pa(VirtAddr::from(id)) {
+                let result: isize;
                 unsafe {
                     let addr = pa.0 as *const u8;
                     result = *addr as isize;
                 }
+                result
+            } else {
+                -1
             }
-            return result;
         }
         1 => {
-            if let Some(pa) = TASK_MANAGER.current_va_2_pa(VirtAddr::from(id)) {
+            if let Some(pa) = TASK_MANAGER.current_write_va_2_pa(VirtAddr::from(id)) {
                 unsafe {
                     let addr = pa.0 as *mut u8;
                     *addr = data as u8;
                 }
+                return 0;
             }
-            return 0;
+            return -1;
         }
         2 => {
             return TASK_MANAGER.get_current_syscall_cnt(id) as isize;
@@ -90,15 +93,27 @@ pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
 }
 
 // YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
-    -1
+pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
+    if (prot & !0x7 != 0) || (prot & 0x7 == 0) {
+        return -1;
+    }
+    let _start = VirtAddr::from(start);
+    if _start.page_offset() != 0  {
+        return -1;
+    }
+    TASK_MANAGER.current_map_new_page(
+        _start,
+        VirtAddr::from(start + len),
+        prot,
+    )
 }
 
 // YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
-    -1
+pub fn sys_munmap(start: usize, len: usize) -> isize {
+    TASK_MANAGER.current_unmap(
+        VirtAddr::from(start),
+        VirtAddr::from(start + len),
+    )
 }
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {

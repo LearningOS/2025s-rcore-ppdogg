@@ -262,6 +262,66 @@ impl MemorySet {
             false
         }
     }
+
+    fn range_overlap(
+        start: VirtAddr,
+        end: VirtAddr,
+        vpn_range: &VPNRange,
+    ) -> bool {
+        if vpn_range.get_end() <= start.floor() || end.ceil() <= vpn_range.get_start() {
+            false
+        } else {
+            true
+        }
+    }
+
+    /// Map new allocated physical page to current page table
+    pub fn map_new_page(&mut self,
+        start: VirtAddr,
+        end: VirtAddr,
+        prot: usize,
+    ) -> bool {
+        if let Some(_) = self
+            .areas
+            .iter_mut()
+            .find(|area| Self::range_overlap(start, end, &area.vpn_range))
+        {
+            return false;
+        }
+
+        let mut map_perm = MapPermission::U;
+        if prot & 0x1 != 0 {
+            map_perm |= MapPermission::R;
+        }
+        if prot & 0x2 != 0 {
+            map_perm |= MapPermission::W;
+        }
+        if prot & 0x4 != 0 {
+            map_perm |= MapPermission::X;
+        }
+
+        self.push(MapArea::new(
+            start,
+            end,
+            MapType::Framed,
+            map_perm,
+        ), None);
+        true
+    }
+
+    /// Unmap allocated physical page of current page table
+    pub fn unmap_page(&mut self, start: VirtAddr, end: VirtAddr) -> bool {
+        for (i, area) in self.areas.iter_mut().enumerate() {
+            if start == VirtAddr::from(area.vpn_range.get_start()) && 
+                end == VirtAddr::from(area.vpn_range.get_end()) 
+            {
+                area.unmap(&mut self.page_table);
+                self.areas.remove(i);
+                return true;
+            }
+        }
+        false
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
