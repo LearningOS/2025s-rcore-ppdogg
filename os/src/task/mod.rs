@@ -17,6 +17,8 @@ mod task;
 use crate::loader::{get_app_data, get_num_app};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
+use crate::mm::{VirtAddr, PhysAddr, VirtPageNum};
+use crate::syscall::SYSCALL_MAP;
 use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
@@ -124,6 +126,38 @@ impl TaskManager {
     fn get_current_trap_cx(&self) -> &'static mut TrapContext {
         let inner = self.inner.exclusive_access();
         inner.tasks[inner.current_task].get_trap_cx()
+    }
+
+    /// Convert a virtual address to a physical address
+    pub fn current_va_2_pa(&self, va: VirtAddr) -> Option<PhysAddr> {
+        let inner = self.inner.exclusive_access();
+        let vpn = VirtPageNum::from(va);
+        let ppn = inner.tasks[inner.current_task].memory_set.translate(vpn).unwrap().ppn();
+        let pa = PhysAddr::from(ppn);
+        Some(PhysAddr::from(pa.0 | va.page_offset()))
+    }
+
+    /// Count syscall from current task
+    pub fn cnt_current_syscall(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current_task = inner.current_task;
+        for (i, syscall) in SYSCALL_MAP.iter().enumerate() {
+            if *syscall == syscall_id {
+                inner.tasks[current_task].syscall_cnt[i] += 1;
+                break;
+            }
+        }
+    }
+
+    /// Get current task count of syscall
+    pub fn get_current_syscall_cnt(&self, syscall_id: usize) -> usize {
+        let inner = self.inner.exclusive_access();
+        for (i, syscall) in SYSCALL_MAP.iter().enumerate() {
+            if *syscall == syscall_id {
+                return inner.tasks[inner.current_task].syscall_cnt[i];
+            }
+        }
+        0
     }
 
     /// Change the current 'Running' task's program break

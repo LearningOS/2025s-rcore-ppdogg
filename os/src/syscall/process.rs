@@ -1,5 +1,9 @@
 //! Process management syscalls
-use crate::task::{change_program_brk, exit_current_and_run_next, suspend_current_and_run_next};
+use crate::{
+    task::{change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TASK_MANAGER},
+    timer::get_time_us,
+    mm::{VirtAddr, PhysAddr},
+};
 
 #[repr(C)]
 #[derive(Debug)]
@@ -25,16 +29,64 @@ pub fn sys_yield() -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
-    -1
+    let us = get_time_us();
+    if let Some(pa) = TASK_MANAGER.current_va_2_pa(VirtAddr::from(ts as usize)) {
+        let pa_ceil = PhysAddr::from(pa.ceil());
+        unsafe {
+            let addr = pa.0 as *mut usize;
+            *addr = us / 1_000_000;
+        }
+        if 16 <= pa_ceil.0 - pa.0 {
+            unsafe {
+                let addr = (pa.0+8) as *mut usize;
+                *addr = us % 1_000_000;
+            }
+            return 0;
+        }
+        if let Some(pa) = TASK_MANAGER.current_va_2_pa(VirtAddr::from(ts as usize + 8)) {
+            unsafe {
+                let addr = pa.0 as *mut usize;
+                *addr = us % 1_000_000;
+            }
+        } else {
+            panic!("page fault");
+        }
+    } else {
+        panic!("page fault");
+    }
+    0
 }
 
 /// TODO: Finish sys_trace to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
-pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
-    trace!("kernel: sys_trace");
-    -1
+pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
+    match trace_request {
+        0 => {
+            let mut result: isize = 0;
+            if let Some(pa) = TASK_MANAGER.current_va_2_pa(VirtAddr::from(id)) {
+                unsafe {
+                    let addr = pa.0 as *const u8;
+                    result = *addr as isize;
+                }
+            }
+            return result;
+        }
+        1 => {
+            if let Some(pa) = TASK_MANAGER.current_va_2_pa(VirtAddr::from(id)) {
+                unsafe {
+                    let addr = pa.0 as *mut u8;
+                    *addr = data as u8;
+                }
+            }
+            return 0;
+        }
+        2 => {
+            return TASK_MANAGER.get_current_syscall_cnt(id) as isize;
+        }
+        _ => return -1,
+    }
 }
 
 // YOUR JOB: Implement mmap.
