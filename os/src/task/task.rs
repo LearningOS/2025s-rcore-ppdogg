@@ -2,7 +2,7 @@
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 use crate::config::TRAP_CONTEXT_BASE;
-use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use crate::mm::{MemorySet, PageTableEntry, PhysPageNum, PhysAddr, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
@@ -84,6 +84,26 @@ impl TaskControlBlockInner {
     }
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
+    }
+    /// map an area to page table
+    pub fn map_new_page(&mut self, start: VirtAddr, end: VirtAddr, prot: usize) -> isize {
+        if self.memory_set.map_new_page(start, end, prot) == false {
+            // panic!("page already exists")
+            return -1;
+        }
+        0
+    }
+    /// unmap an area of page table
+    pub fn unmap_page(&mut self, start: VirtAddr, end: VirtAddr) -> isize {
+        if self.memory_set.unmap_page(start, end) == false {
+            // panic!("page doesn't exist")
+            return -1;
+        }
+        0
+    }
+    /// loop up page table to find entry
+    pub fn find_pte(&self, va: VirtAddr) -> Option<PageTableEntry> {
+        self.memory_set.translate(va.floor())
     }
 }
 
@@ -206,6 +226,66 @@ impl TaskControlBlock {
         // ---- release parent PCB
     }
 
+    /// create child for another task(fork without copy page table)
+    pub fn spawn_child(self: &Arc<Self>, elf_data: &[u8]) -> Arc<Self> {
+        // ---- access parent PCB exclusively
+        let mut parent_inner = self.inner_exclusive_access();
+        // memory_set with elf program headers/trampoline/trap context/user stack
+        let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
+        let trap_cx_ppn = memory_set
+            .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
+            .unwrap()
+            .ppn();
+        // initialize trap_cx
+        *trap_cx_ppn.get_mut() = TrapContext::app_init_context(
+            entry_point,
+            user_sp,
+            KERNEL_SPACE.exclusive_access().token(),
+            self.kernel_stack.get_top(),
+            trap_handler as usize,
+        );
+        // alloc a pid and a kernel stack in kernel space
+        let pid_handle = pid_alloc();
+        let kernel_stack = kstack_alloc();
+        let kernel_stack_top = kernel_stack.get_top();
+        let task_control_block = Arc::new(TaskControlBlock {
+            pid: pid_handle,
+            kernel_stack,
+            inner: unsafe {
+                UPSafeCell::new(TaskControlBlockInner {
+                    trap_cx_ppn,
+                    base_size: user_sp,
+                    task_cx: TaskContext::goto_trap_return(kernel_stack_top),
+                    task_status: TaskStatus::Ready,
+                    memory_set,
+                    parent: Some(Arc::downgrade(self)),
+                    children: Vec::new(),
+                    exit_code: 0,
+                    heap_bottom: parent_inner.heap_bottom,
+                    program_brk: parent_inner.program_brk,
+                })
+            },
+        });
+        // add child
+        parent_inner.children.push(task_control_block.clone());
+        // **** access current TCB exclusively
+        // let inner = task_control_block.inner_exclusive_access();
+        // // initialize trap_cx
+        // let trap_cx = inner.get_trap_cx();
+        // *trap_cx = TrapContext::app_init_context(
+        //     entry_point,
+        //     user_sp,
+        //     KERNEL_SPACE.exclusive_access().token(),
+        //     kernel_stack_top,
+        //     trap_handler as usize,
+        // );
+        // drop(inner);
+        // return
+        task_control_block
+        // **** release child PCB
+        // ---- release parent PCB
+    }
+
     /// get pid of process
     pub fn getpid(&self) -> usize {
         self.pid.0
@@ -232,6 +312,46 @@ impl TaskControlBlock {
         if result {
             inner.program_brk = new_brk as usize;
             Some(old_break)
+        } else {
+            None
+        }
+    }
+
+    /// map an new area to page table of current task
+    pub fn map_new_area(&self, start: VirtAddr, end: VirtAddr, prot: usize) -> isize {
+        let mut inner = self.inner_exclusive_access();
+        inner.map_new_page(start, end, prot)
+    }
+
+    /// unmap an area of page table of current task
+    pub fn unmap_area(&self, start: VirtAddr, end: VirtAddr) -> isize {
+        let mut inner = self.inner_exclusive_access();
+        inner.unmap_page(start, end)
+    }
+
+    /// convert virtual address to physical address
+    /// request: 0(read), 1(write),
+    pub fn va2pa(&self, request: usize, va: VirtAddr) -> Option<PhysAddr> {
+        let inner = self.inner_exclusive_access();
+        if let Some(pte) = inner.find_pte(va) {
+            if !pte.accessible() {
+                return None;
+            }
+            match request {
+                0 => {
+                    if !pte.readable() {
+                        return None;
+                    }
+                }
+                1 => {
+                    if !pte.writable() {
+                        return None;
+                    }
+                }
+                _ => return None,
+            }
+            let pa = PhysAddr::from(pte.ppn());
+            Some(PhysAddr::from(pa.0 | va.page_offset()))
         } else {
             None
         }

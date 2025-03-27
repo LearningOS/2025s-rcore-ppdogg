@@ -2,8 +2,9 @@
 use alloc::sync::Arc;
 
 use crate::{
+    timer::get_time_us,
     loader::get_app_data_by_name,
-    mm::{translated_refmut, translated_str},
+    mm::{translated_refmut, translated_str, VirtAddr, PhysAddr},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
         suspend_current_and_run_next,
@@ -105,30 +106,70 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let us = get_time_us();
+    if let Some(pa) = current_task().unwrap().va2pa(1, VirtAddr::from(ts as usize)) {
+        unsafe {
+            let addr = pa.0 as *mut usize;
+            *addr = us / 1_000_000;
+        }
+
+        let pa_ceil = PhysAddr::from(pa.ceil());
+        if 16 <= pa_ceil.0 - pa.0 {
+            unsafe {
+                let addr = (pa.0+8) as *mut usize;
+                *addr = us % 1_000_000;
+            }
+            return 0;
+        }
+        if let Some(pa) = current_task().unwrap().va2pa(1, VirtAddr::from(ts as usize + 8)) {
+            unsafe {
+                let addr = pa.0 as *mut usize;
+                *addr = us % 1_000_000;
+            }
+        } else {
+            panic!("page fault");
+        }
+    } else {
+        panic!("page fault");
+    }
+    0
 }
 
 /// YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
+pub fn sys_mmap(_start: usize, len: usize, prot: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    if (prot & !0x7 != 0) || (prot & 0x7 == 0) {
+        return -1;
+    }
+    let start = VirtAddr::from(_start);
+    if start.page_offset() != 0  {
+        return -1;
+    }
+    current_task().unwrap().map_new_area(
+        start,
+        VirtAddr::from(_start + len),
+        prot,
+    )
 }
 
 /// YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
+pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    current_task().unwrap().unmap_area(
+        VirtAddr::from(start),
+        VirtAddr::from(start + len),
+    )
 }
 
 /// change data segment size
@@ -143,12 +184,31 @@ pub fn sys_sbrk(size: i32) -> isize {
 
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
-pub fn sys_spawn(_path: *const u8) -> isize {
+pub fn sys_spawn(path: *const u8) -> isize {
     trace!(
         "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+
+    let current_task = current_task().unwrap();
+    let token = current_user_token();
+    let path = translated_str(token, path);
+    if let Some(data) = get_app_data_by_name(path.as_str()) {
+        let new_task = current_task.spawn_child(data);
+        let new_pid = new_task.pid.0;
+        
+        // modify trap context of new_task, because it returns immediately after switching
+        let trap_cx = new_task.inner_exclusive_access().get_trap_cx();
+        // we do not have to move to next instruction since we have done it before
+        // for child process, fork returns 0
+        trap_cx.x[10] = 0;
+        // add new task to scheduler
+        add_task(new_task);
+
+        new_pid as isize
+    } else {
+        -1
+    }
 }
 
 // YOUR JOB: Set task priority.
