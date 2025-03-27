@@ -111,6 +111,25 @@ impl TaskControlBlockInner {
     /// get stride of task
     pub fn get_stride(&self) -> usize {
         self.stride
+    /// map an area to page table
+    pub fn map_new_page(&mut self, start: VirtAddr, end: VirtAddr, prot: usize) -> isize {
+        if self.memory_set.map_new_page(start, end, prot) == false {
+            // panic!("page already exists")
+            return -1;
+        }
+        0
+    }
+    /// unmap an area of page table
+    pub fn unmap_page(&mut self, start: VirtAddr, end: VirtAddr) -> isize {
+        if self.memory_set.unmap_page(start, end) == false {
+            // panic!("page doesn't exist")
+            return -1;
+        }
+        0
+    }
+    /// loop up page table to find entry
+    pub fn find_pte(&self, va: VirtAddr) -> Option<PageTableEntry> {
+        self.memory_set.translate(va.floor())
     }
 }
 

@@ -289,6 +289,55 @@ impl MemorySet {
         self.areas.clear();
     }
 
+    fn range_overlap(
+        start: VirtAddr,
+        end: VirtAddr,
+        vpn_range: &VPNRange,
+    ) -> bool {
+        if vpn_range.get_end() <= start.floor() || end.ceil() <= vpn_range.get_start() {
+            false
+        } else {
+            true
+        }
+    }
+
+    /// Map new allocated physical page to current page table
+    pub fn map_new_page(&mut self,
+        start: VirtAddr,
+        end: VirtAddr,
+        prot: usize,
+    ) -> bool {
+        if let Some(_) = self
+            .areas
+            .iter_mut()
+            .find(|area| Self::range_overlap(start, end, &area.vpn_range))
+        {
+            return false;
+        }
+
+        self.push(MapArea::new(
+            start,
+            end,
+            MapType::Framed,
+            MapPermission::from_bits_truncate((prot << 1) as u8) | MapPermission::U,
+        ), None);
+        true
+    }
+
+    /// Unmap allocated physical page of current page table
+    pub fn unmap_page(&mut self, start: VirtAddr, end: VirtAddr) -> bool {
+        for (i, area) in self.areas.iter_mut().enumerate() {
+            if start == VirtAddr::from(area.vpn_range.get_start()) && 
+                end == VirtAddr::from(area.vpn_range.get_end()) 
+            {
+                area.unmap(&mut self.page_table);
+                self.areas.remove(i);
+                return true;
+            }
+        }
+        false
+    }
+
     /// shrink the area to new_end
     #[allow(unused)]
     pub fn shrink_to(&mut self, start: VirtAddr, new_end: VirtAddr) -> bool {
