@@ -1,0 +1,1 @@
+Add field `stride` and `pass` for task.

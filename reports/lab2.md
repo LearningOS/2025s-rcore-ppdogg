@@ -1,0 +1,1 @@
+add syscall `sys_get_time`, `sys_trace`, `sys_mmap`, `sys_munmap`
