@@ -1,7 +1,7 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::TRAP_CONTEXT_BASE;
+use crate::config::{TRAP_CONTEXT_BASE, BIG_STRIDE};
 use crate::mm::{MemorySet, PageTableEntry, PhysPageNum, PhysAddr, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
@@ -68,6 +68,12 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// Program excution time
+    pub stride: usize,
+
+    /// Program priority
+    pub pass: usize,
 }
 
 impl TaskControlBlockInner {
@@ -105,6 +111,18 @@ impl TaskControlBlockInner {
     pub fn find_pte(&self, va: VirtAddr) -> Option<PageTableEntry> {
         self.memory_set.translate(va.floor())
     }
+    /// set priority of task
+    pub fn set_priority(&mut self, prio: usize) {
+        self.pass = BIG_STRIDE / prio;
+    }
+    /// add stride of task
+    pub fn add_pass(&mut self) {
+        self.stride = self.stride.wrapping_add(self.pass);
+    }
+    /// get stride of task
+    pub fn get_stride(&self) -> usize {
+        self.stride
+    }
 }
 
 impl TaskControlBlock {
@@ -138,6 +156,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    stride: 0,
+                    pass: BIG_STRIDE / 16,
                 })
             },
         };
@@ -211,6 +231,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    stride: 0,
+                    pass: parent_inner.pass,
                 })
             },
         });
@@ -263,23 +285,13 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    stride: 0,
+                    pass: parent_inner.pass,
                 })
             },
         });
         // add child
         parent_inner.children.push(task_control_block.clone());
-        // **** access current TCB exclusively
-        // let inner = task_control_block.inner_exclusive_access();
-        // // initialize trap_cx
-        // let trap_cx = inner.get_trap_cx();
-        // *trap_cx = TrapContext::app_init_context(
-        //     entry_point,
-        //     user_sp,
-        //     KERNEL_SPACE.exclusive_access().token(),
-        //     kernel_stack_top,
-        //     trap_handler as usize,
-        // );
-        // drop(inner);
         // return
         task_control_block
         // **** release child PCB
@@ -355,6 +367,18 @@ impl TaskControlBlock {
         } else {
             None
         }
+    }
+
+    /// set priority of task
+    pub fn set_priority(&self, prio: usize) {
+        let mut inner = self.inner_exclusive_access();
+        inner.set_priority(prio);
+    }
+
+    /// get stride of task
+    pub fn get_stride(&self) -> usize {
+        let inner = self.inner_exclusive_access();
+        inner.get_stride()
     }
 }
 

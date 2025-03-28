@@ -23,7 +23,16 @@ impl TaskManager {
     }
     /// Take a process out of the ready queue
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
-        self.ready_queue.pop_front()
+        let mut index: usize = 0;
+        let mut min_stride: usize = 0;
+        for (i, tcb) in self.ready_queue.iter().enumerate() {
+            if tcb.get_stride() < min_stride {
+                index = i;
+                min_stride = tcb.get_stride();
+            }
+        }
+        self.ready_queue.remove(index)
+        // self.ready_queue.pop_front()
     }
 }
 
