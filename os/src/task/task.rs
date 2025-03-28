@@ -111,6 +111,7 @@ impl TaskControlBlockInner {
     /// get stride of task
     pub fn get_stride(&self) -> usize {
         self.stride
+    }
     /// map an area to page table
     pub fn map_new_page(&mut self, start: VirtAddr, end: VirtAddr, prot: usize) -> isize {
         if self.memory_set.map_new_page(start, end, prot) == false {
@@ -290,6 +291,15 @@ impl TaskControlBlock {
             self.kernel_stack.get_top(),
             trap_handler as usize,
         );
+        // copy fd table
+        let mut new_fd_table: Vec<Option<Arc<dyn File + Send + Sync>>> = Vec::new();
+        for fd in parent_inner.fd_table.iter() {
+            if let Some(file) = fd {
+                new_fd_table.push(Some(file.clone()));
+            } else {
+                new_fd_table.push(None);
+            }
+        }
         // alloc a pid and a kernel stack in kernel space
         let pid_handle = pid_alloc();
         let kernel_stack = kstack_alloc();
@@ -307,6 +317,7 @@ impl TaskControlBlock {
                     parent: Some(Arc::downgrade(self)),
                     children: Vec::new(),
                     exit_code: 0,
+                    fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
                     stride: 0,

@@ -5,7 +5,6 @@ use alloc::sync::Arc;
 use crate::{
     fs::{open_file, OpenFlags},
     timer::get_time_us,
-    loader::get_app_data_by_name,
     mm::{translated_refmut, translated_str, VirtAddr, PhysAddr},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
@@ -191,11 +190,11 @@ pub fn sys_spawn(path: *const u8) -> isize {
         current_task().unwrap().pid.0
     );
 
-    let current_task = current_task().unwrap();
     let token = current_user_token();
     let path = translated_str(token, path);
-    if let Some(data) = get_app_data_by_name(path.as_str()) {
-        let new_task = current_task.spawn_child(data);
+    if let Some(app_inode) = open_file(path.as_str(), OpenFlags::RDONLY) {
+        let all_data = app_inode.read_all();
+        let new_task = current_task().unwrap().spawn_child(&all_data);
         let new_pid = new_task.pid.0;
         
         // modify trap context of new_task, because it returns immediately after switching

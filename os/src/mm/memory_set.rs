@@ -326,14 +326,16 @@ impl MemorySet {
 
     /// Unmap allocated physical page of current page table
     pub fn unmap_page(&mut self, start: VirtAddr, end: VirtAddr) -> bool {
-        for (i, area) in self.areas.iter_mut().enumerate() {
-            if start == VirtAddr::from(area.vpn_range.get_start()) && 
-                end == VirtAddr::from(area.vpn_range.get_end()) 
-            {
-                area.unmap(&mut self.page_table);
-                self.areas.remove(i);
-                return true;
-            }
+        if let Some((i, area)) = self
+            .areas
+            .iter_mut()
+            .enumerate()
+            .find(|(_, area)| start == VirtAddr::from(area.vpn_range.get_start()) &&
+                end == VirtAddr::from(area.vpn_range.get_end()))
+        {
+            area.unmap(&mut self.page_table);
+            self.areas.remove(i);
+            return true;
         }
         false
     }
