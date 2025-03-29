@@ -1,0 +1,1 @@
+add syscall `fstate`, `linkat` and `unlinkat`

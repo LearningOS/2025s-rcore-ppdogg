@@ -36,7 +36,7 @@ impl EasyFileSystem {
         let data_bitmap_blocks = (data_total_blocks + 4096) / 4097;
         let data_area_blocks = data_total_blocks - data_bitmap_blocks;
         let data_bitmap = Bitmap::new(
-            (1 + inode_bitmap_blocks + inode_area_blocks) as usize,
+            (1 + inode_total_blocks) as usize,
             data_bitmap_blocks as usize,
         );
         let mut efs = Self {
@@ -124,6 +124,12 @@ impl EasyFileSystem {
     /// Get data block by id
     pub fn get_data_block_id(&self, data_block_id: u32) -> u32 {
         self.data_area_start_block + data_block_id
+    }
+    /// Get inode id by data block id
+    pub fn get_inode_id(&self, inode_block_id: u32, block_offset: usize) -> u32 {
+        let inode_size = core::mem::size_of::<DiskInode>();
+        let inodes_per_block = (BLOCK_SZ / inode_size) as u32;
+        (inode_block_id - self.inode_area_start_block) * inodes_per_block + (block_offset / inode_size) as u32
     }
     /// Allocate a new inode
     pub fn alloc_inode(&mut self) -> u32 {
