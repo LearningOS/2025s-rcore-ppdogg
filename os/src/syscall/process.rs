@@ -1,6 +1,7 @@
 use crate::{
+    timer::get_time_us,
     fs::{open_file, OpenFlags},
-    mm::{translated_ref, translated_refmut, translated_str},
+    mm::{translated_ref, translated_refmut, translated_str, VirtAddr, PhysAddr},
     task::{
         current_process, current_task, current_user_token, exit_current_and_run_next, pid2process,
         suspend_current_and_run_next, SignalFlags,
@@ -151,12 +152,38 @@ pub fn sys_kill(pid: usize, signal: u32) -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
         current_task().unwrap().process.upgrade().unwrap().getpid()
     );
-    -1
+    let us = get_time_us();
+    if let Some(pa) = current_process().va2pa(1, VirtAddr::from(ts as usize)) {
+        unsafe {
+            let addr = pa.0 as *mut usize;
+            *addr = us / 1_000_000;
+        }
+
+        let pa_ceil = PhysAddr::from(pa.ceil());
+        if 16 <= pa_ceil.0 - pa.0 {
+            unsafe {
+                let addr = (pa.0+8) as *mut usize;
+                *addr = us % 1_000_000;
+            }
+            return 0;
+        }
+        if let Some(pa) = current_process().va2pa(1, VirtAddr::from(ts as usize + 8)) {
+            unsafe {
+                let addr = pa.0 as *mut usize;
+                *addr = us % 1_000_000;
+            }
+        } else {
+            panic!("page fault");
+        }
+    } else {
+        panic!("page fault");
+    }
+    0
 }
 
 /// mmap syscall

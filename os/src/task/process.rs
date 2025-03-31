@@ -6,7 +6,7 @@ use super::TaskControlBlock;
 use super::{add_task, SignalFlags};
 use super::{pid_alloc, PidHandle};
 use crate::fs::{File, Stdin, Stdout};
-use crate::mm::{translated_refmut, MemorySet, KERNEL_SPACE};
+use crate::mm::{translated_refmut, MemorySet, KERNEL_SPACE, VirtAddr, PhysAddr, PageTableEntry};
 use crate::sync::{Condvar, Mutex, Semaphore, UPSafeCell};
 use crate::trap::{trap_handler, TrapContext};
 use alloc::string::String;
@@ -81,6 +81,10 @@ impl ProcessControlBlockInner {
     /// get a task with tid in this process
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
+    }
+    /// look up page table to find entry
+    pub fn find_pte(&self, va: VirtAddr) -> Option<PageTableEntry> {
+        self.memory_set.translate(va.floor())
     }
 }
 
@@ -281,5 +285,33 @@ impl ProcessControlBlock {
     /// get pid
     pub fn getpid(&self) -> usize {
         self.pid.0
+    }
+
+    /// convert virtual address to physical address
+    /// request: 0(read), 1(write),
+    pub fn va2pa(&self, request: usize, va: VirtAddr) -> Option<PhysAddr> {
+        let inner = self.inner_exclusive_access();
+        if let Some(pte) = inner.find_pte(va) {
+            if !pte.accessible() {
+                return None;
+            }
+            match request {
+                0 => {
+                    if !pte.readable() {
+                        return None;
+                    }
+                }
+                1 => {
+                    if !pte.writable() {
+                        return None;
+                    }
+                }
+                _ => return None,
+            }
+            let pa = PhysAddr::from(pte.ppn());
+            Some(PhysAddr::from(pa.0 | va.page_offset()))
+        } else {
+            None
+        }
     }
 }
