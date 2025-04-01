@@ -6,6 +6,7 @@ use crate::trap::TrapContext;
 use crate::{mm::PhysPageNum, sync::UPSafeCell};
 use alloc::sync::{Arc, Weak};
 use core::cell::RefMut;
+use alloc::{vec, vec::Vec};
 
 /// Task control block structure
 pub struct TaskControlBlock {
@@ -28,6 +29,36 @@ impl TaskControlBlock {
         let inner = process.inner_exclusive_access();
         inner.memory_set.token()
     }
+    /// Update the count of semaphore
+    pub fn update_sem_alloc(&self, sem_id: usize) {
+        let mut task_inner = self.inner_exclusive_access();
+        task_inner.semaphore_alloc_list[sem_id] += 1;
+    }
+    /// Get the count of semaphore
+    pub fn get_sem_alloc(&self, sem_id: usize) -> isize {
+        let task_inner = self.inner_exclusive_access();
+        task_inner.semaphore_alloc_list[sem_id]
+    }
+    /// Reset the count of semaphore
+    pub fn reset_sem_alloc(&self, sem_id: usize) {
+        let mut task_inner = self.inner_exclusive_access();
+        task_inner.semaphore_alloc_list[sem_id] = 0;
+    }
+    /// Update the count of semaphore
+    pub fn update_sem_need(&self, sem_id: usize) {
+        let mut task_inner = self.inner_exclusive_access();
+        task_inner.semaphore_need_list[sem_id] += 1;
+    }
+    /// Get the count of semaphore
+    pub fn get_sem_need(&self, sem_id: usize) -> isize {
+        let task_inner = self.inner_exclusive_access();
+        task_inner.semaphore_need_list[sem_id]
+    }
+    /// Reset the count of semaphore
+    pub fn reset_sem_need(&self, sem_id: usize) {
+        let mut task_inner = self.inner_exclusive_access();
+        task_inner.semaphore_need_list[sem_id] = 0;
+    }
 }
 
 pub struct TaskControlBlockInner {
@@ -41,6 +72,10 @@ pub struct TaskControlBlockInner {
     pub task_status: TaskStatus,
     /// It is set when active exit or execution error occurs
     pub exit_code: Option<i32>,
+    /// semaphore alloc list
+    pub semaphore_alloc_list: Vec<isize>,
+    /// semaphore need list
+    pub semaphore_need_list: Vec<isize>,
 }
 
 impl TaskControlBlockInner {
@@ -75,6 +110,8 @@ impl TaskControlBlock {
                     task_cx: TaskContext::goto_trap_return(kstack_top),
                     task_status: TaskStatus::Ready,
                     exit_code: None,
+                    semaphore_alloc_list: vec![0;5],
+                    semaphore_need_list: vec![0;5],
                 })
             },
         }
