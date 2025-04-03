@@ -87,39 +87,37 @@ impl ProcessControlBlockInner {
     }
     /// detect deadlock
     /// lock_type: 0(mutex), 1(semaphore)
-    pub fn deadlock_detect(&self, _task_id: usize, lock_type: usize, lock_id: usize) -> bool {
+    pub fn deadlock_detect(&self, lock_type: usize) -> bool {
+        if !self.enable_deadlock_detect {
+            return false;
+        }
+        // finish
+        let mut finish: Vec<bool> = Vec::with_capacity(self.tasks.len());
+        for _ in 0..self.tasks.len() {
+            finish.push(false);
+        }
         match lock_type {
             0 => {
                 // mutex list
-                if self.mutex_list[lock_id].as_ref().unwrap().is_locked() {
-                    return true;
-                }
-                false
-            }
-            1 => {
-                // semaphore list
-                // finish
-                let mut finish: Vec<bool> = Vec::with_capacity(self.tasks.len());
-                finish.push(true);
-                for _ in 1..self.tasks.len() {
-                    finish.push(false);
-                }
-                // avalible
-                let mut work: Vec<isize> = Vec::with_capacity(self.semaphore_list.len());
-                work.push(4);
-                for i in 1..self.semaphore_list.len() {
-                    work.push(self.semaphore_list[i].as_ref().unwrap().get_count());
+                // avalible resource
+                let mut work: Vec<isize> = Vec::with_capacity(self.mutex_list.len());
+                for i in 0..self.mutex_list.len() {
+                    if self.mutex_list[i].as_ref().unwrap().is_locked() {
+                        work.push(0);
+                    } else {
+                        work.push(1);
+                    }
                 }
 
                 loop {
                     let mut find_tid = false;
-                    for tid in 1..self.tasks.len() {
+                    for tid in 0..self.tasks.len() {
                         if finish[tid] {
                             continue;
                         }
                         let mut satisfy_need = true;
-                        for sem_id in 1..self.semaphore_list.len() {
-                            if work[sem_id] < self.tasks[tid].as_ref().unwrap().get_sem_need(sem_id) {
+                        for mid in 0..self.mutex_list.len() {
+                            if work[mid] < self.tasks[tid].as_ref().unwrap().get_mutex_need(mid) {
                                 satisfy_need = false;
                                 break;
                             }
@@ -128,23 +126,74 @@ impl ProcessControlBlockInner {
                         if satisfy_need {
                             find_tid = true;
                             finish[tid] = true;
-                            for sem_id in 1..self.semaphore_list.len() {
+                            for mid in 0..self.mutex_list.len() {
+                                work[mid] += self.tasks[tid].as_ref().unwrap().get_mutex_alloc(mid);
+                            }
+                        }
+                    }
+
+                    if !find_tid {
+                        break;
+                    }
+                }
+            }
+            1 => {
+                // semaphore list
+                // avalible resource
+                let mut work: Vec<isize> = Vec::with_capacity(self.semaphore_list.len());
+                for i in 0..self.semaphore_list.len() {
+                    let res = if 0 < self.semaphore_list[i].as_ref().unwrap().get_count() {
+                        self.semaphore_list[i].as_ref().unwrap().get_count()
+                    } else {
+                        0
+                    };
+                    work.push(res);
+                }
+
+                loop {
+                    let mut find_tid = false;
+                    for tid in 0..self.tasks.len() {
+                        if finish[tid] {
+                            continue;
+                        }
+                        let mut satisfy_need = true;
+                        debug!("cur tid {}", tid);
+                        for sem_id in 1..self.semaphore_list.len() {
+                            debug!("sem {} work({})-task({})", sem_id, work[sem_id], self.tasks[tid].as_ref().unwrap().get_sem_need(sem_id));
+                            if work[sem_id] <= 0 && 0 < self.tasks[tid].as_ref().unwrap().get_sem_need(sem_id) {
+                                satisfy_need = false;
+                                break;
+                            }
+                        }
+
+                        if satisfy_need {
+                            find_tid = true;
+                            finish[tid] = true;
+                            debug!("find tid {}", tid);
+                            for sem_id in 0..self.semaphore_list.len() {
+                                debug!("{}({})",sem_id,self.tasks[tid].as_ref().unwrap().get_sem_alloc(sem_id));
                                 work[sem_id] += self.tasks[tid].as_ref().unwrap().get_sem_alloc(sem_id);
                             }
                         }
                     }
 
                     if !find_tid {
-                        if finish.iter().find(|state| **state == false).is_some() {
-                            return true;
+                        debug!("work result");
+                        for i in 0..self.semaphore_list.len() {
+                            debug!("{}({})",i,work[i]);
                         }
                         break;
                     }
-                }
-                
-                false
+                }         
             }
             _ => panic!("unsupported lock type"),
+        }
+        if let Some((tid, _)) = finish.iter().enumerate().find(|(_,state)| **state==false) {
+            debug!("task {} can not finish", tid);
+            debug!("");
+            true
+        } else {
+            false
         }
     }
 }

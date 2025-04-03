@@ -29,6 +29,9 @@ impl TaskControlBlock {
         let inner = process.inner_exclusive_access();
         inner.memory_set.token()
     }
+}
+
+impl TaskControlBlock {
     /// Update the count of semaphore
     pub fn update_sem_alloc(&self, sem_id: usize) {
         let mut task_inner = self.inner_exclusive_access();
@@ -42,7 +45,7 @@ impl TaskControlBlock {
     /// Reset the count of semaphore
     pub fn reset_sem_alloc(&self, sem_id: usize) {
         let mut task_inner = self.inner_exclusive_access();
-        task_inner.semaphore_alloc_list[sem_id] = 0;
+        task_inner.semaphore_alloc_list[sem_id] -= 1;
     }
     /// Update the count of semaphore
     pub fn update_sem_need(&self, sem_id: usize) {
@@ -57,7 +60,37 @@ impl TaskControlBlock {
     /// Reset the count of semaphore
     pub fn reset_sem_need(&self, sem_id: usize) {
         let mut task_inner = self.inner_exclusive_access();
-        task_inner.semaphore_need_list[sem_id] = 0;
+        task_inner.semaphore_need_list[sem_id] -= 1;
+    }
+    /// Update the count of semaphore
+    pub fn update_mutex_alloc(&self, mid: usize) {
+        let mut task_inner = self.inner_exclusive_access();
+        task_inner.mutex_alloc_list[mid] += 1;
+    }
+    /// Get the count of semaphore
+    pub fn get_mutex_alloc(&self, mid: usize) -> isize {
+        let task_inner = self.inner_exclusive_access();
+        task_inner.mutex_alloc_list[mid]
+    }
+    /// Reset the count of semaphore
+    pub fn reset_mutex_alloc(&self, mid: usize) {
+        let mut task_inner = self.inner_exclusive_access();
+        task_inner.mutex_alloc_list[mid] = 0;
+    }
+    /// Update the count of semaphore
+    pub fn update_mutex_need(&self, mid: usize) {
+        let mut task_inner = self.inner_exclusive_access();
+        task_inner.mutex_need_list[mid] += 1;
+    }
+    /// Get the count of semaphore
+    pub fn get_mutex_need(&self, mid: usize) -> isize {
+        let task_inner = self.inner_exclusive_access();
+        task_inner.mutex_need_list[mid]
+    }
+    /// Reset the count of semaphore
+    pub fn reset_mutex_need(&self, mid: usize) {
+        let mut task_inner = self.inner_exclusive_access();
+        task_inner.mutex_need_list[mid] = 0;
     }
 }
 
@@ -76,6 +109,10 @@ pub struct TaskControlBlockInner {
     pub semaphore_alloc_list: Vec<isize>,
     /// semaphore need list
     pub semaphore_need_list: Vec<isize>,
+    /// mutex alloc list
+    pub mutex_alloc_list: Vec<isize>,
+    /// mutex need list
+    pub mutex_need_list: Vec<isize>,
 }
 
 impl TaskControlBlockInner {
@@ -112,6 +149,8 @@ impl TaskControlBlock {
                     exit_code: None,
                     semaphore_alloc_list: vec![0;5],
                     semaphore_need_list: vec![0;5],
+                    mutex_alloc_list: vec![0;5],
+                    mutex_need_list: vec![0;5],
                 })
             },
         }

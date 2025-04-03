@@ -1,0 +1,1 @@
+add syscall `deadlock_detect`
